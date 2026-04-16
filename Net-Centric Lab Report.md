@@ -568,3 +568,880 @@ func file_book_proto_init() {
 }
 
 ```
+
+## Task 2: Simple gRPC Service 
+
+- **server/main.go**
+
+```
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"math"
+	"net"
+	
+	pb "book-catalog-grpc/proto"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
+
+type calculatorServer struct {
+	pb.UnimplementedCalculatorServer
+	history []string  // Store calculation history
+}
+
+func (s *calculatorServer) Calculate(ctx context.Context, req *pb.CalculateRequest) (*pb.CalculateResponse, error) {
+	log.Printf("Calculate: %.2f %s %.2f", req.A, req.Operation, req.B)
+	
+	var result float32
+	
+	// TODO: Implement operations
+	switch req.Operation {
+	case "add":
+		// TODO: result = a + b
+		result = req.A + req.B
+	case "subtract":
+		// TODO: result = a - b
+		result = req.A - req.B
+	case "multiply":
+		// TODO: result = a * b
+		result = req.A * req.B
+	case "divide":
+		// TODO: Check if b == 0, return error if so
+		if req.B == 0 {
+			return nil, status.Error(codes.InvalidArgument, "cannot divide by 0")
+		}
+		// TODO: result = a / b
+		result = req.A / req.B
+	default:
+		return nil, status.Errorf(codes.InvalidArgument, 
+			"unknown operation: %s", req.Operation)
+	}
+	
+	// TODO: Add to history
+	historyEntry := fmt.Sprintf("%.2f %s %.2f = %.2f", 
+		req.A, req.Operation, req.B, result)
+	s.history = append(s.history, historyEntry)
+	
+	return &pb.CalculateResponse{
+		Result:    result,
+		Operation: req.Operation,
+	}, nil
+}
+
+func (s *calculatorServer) SquareRoot(ctx context.Context, req *pb.SquareRootRequest) (*pb.SquareRootResponse, error) {
+	log.Printf("SquareRoot: %.2f", req.Number)
+	
+	// TODO: Check if number is negative
+	if req.Number < 0 {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"cannot calculate square root of negative number: %.2f", req.Number)
+	}
+	
+	// TODO: Calculate square root
+	result := float32(math.Sqrt(float64(req.Number)))
+	
+	// TODO: Add to history
+	historyEntry := fmt.Sprintf("sqrt(%.2f) = %.2f", req.Number, result)
+	s.history = append(s.history, historyEntry)
+	
+	return &pb.SquareRootResponse{Result: result}, nil
+}
+
+func (s *calculatorServer) GetHistory(ctx context.Context, req *pb.HistoryRequest) (*pb.HistoryResponse, error) {
+	log.Println("GetHistory called")
+	
+	// TODO: Return history
+	return &pb.HistoryResponse{
+		Calculations: s.history,
+		Count:        int32(len(s.history)),
+	}, nil
+}
+
+func main() {
+	// TODO: Create listener on port 50051
+	listener, err := net.Listen("tcp", ":50051")
+	if err != nil {
+		log.Fatal("Failed to listen to :50051", err)
+	}
+
+	fmt.Println("🚀 Calculator gRPC server listening on :50051")
+	
+	// TODO: Create gRPC server
+	grpcServer := grpc.NewServer()
+	
+	// TODO: Register Calculator service
+	pb.RegisterCalculatorServer(grpcServer, &calculatorServer{})
+	
+	// TODO: Start serving
+	if err := grpcServer.Serve(listener); err != nil {
+		log.Fatal("Failed to server grpcServer", err)
+	}
+}
+```
+
+
+- **client/main.go**
+
+```
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"time"
+
+	pb "book-catalog-grpc/proto"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
+)
+
+func main() {
+	// TODO: Connect to server
+	conn, err := grpc.NewClient("localhost:50051",
+		grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Fatalf("Failed to connect: %v", err)
+	}
+	defer conn.Close()
+
+	client := pb.NewCalculatorClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Test 1: Addition
+	fmt.Println("=== Test 1: Addition ===")
+	resp, err := client.Calculate(ctx, &pb.CalculateRequest{
+		A:         10,
+		B:         5,
+		Operation: "add",
+	})
+	// TODO: Handle error and print result
+	if err != nil {
+		log.Fatal("Calculation add failed: ", err)
+	}
+
+	fmt.Printf("Result: %.2f + %.2f = %.2f", 10.0, 5.0, resp.Result)
+
+	// Test 2: Division
+	fmt.Println("\n=== Test 2: Division ===")
+	// TODO: Test 20 / 4
+	resp, err = client.Calculate(ctx, &pb.CalculateRequest{
+		A:         20,
+		B:         4,
+		Operation: "divide",
+	})
+	if err != nil {
+		log.Fatal("Calculation divide failed: ", err)
+	}
+
+	fmt.Printf("Result: %.2f / %.2f = %.2f", 20.0, 4.0, resp.Result)
+
+	// Test 3: Division by zero (should error)
+	fmt.Println("\n=== Test 3: Division by Zero ===")
+	_, err = client.Calculate(ctx, &pb.CalculateRequest{
+		A:         10,
+		B:         0,
+		Operation: "divide",
+	})
+	if err != nil {
+		st, _ := status.FromError(err)
+		fmt.Printf("Expected error: %s\n", st.Message())
+	}
+
+	// Test 4: Square root
+	fmt.Println("\n=== Test 4: Square Root ===")
+	// TODO: Test sqrt(16)
+	sqrtResp, err := client.SquareRoot(ctx, &pb.SquareRootRequest{
+		Number: 16,
+	})
+	if err != nil {
+		log.Fatal("Square root calculation failed: ", err)
+	}
+
+	fmt.Printf("Result: sqrt(%.2f) = %.2f", 16.0, sqrtResp.Result)
+
+	// Test 5: Negative square root (should error)
+	fmt.Println("\n=== Test 5: Negative Square Root ===")
+	// TODO: Test sqrt(-4), should error
+	_, err = client.SquareRoot(ctx, &pb.SquareRootRequest{
+		Number: -4,
+	})
+	if err != nil {
+		st, _ := status.FromError(err)
+		fmt.Printf("Expected error: %s\n", st.Message())
+	}
+
+	// Test 6: Get history
+	fmt.Println("\n=== Test 6: History ===")
+	// TODO: Get and print all calculations
+	historyResp, err := client.GetHistory(ctx, &pb.HistoryRequest{})
+
+	if err != nil {
+		log.Fatal("Failed to get history: ", err)
+	}
+
+	for i, h := range historyResp.GetCalculations() {
+		fmt.Printf("%d. %s\n", i+1, h)
+	}
+}
+
+```
+
+
+- **proto/calculator.proto**
+
+```
+syntax = "proto3";
+
+package calculator;
+
+option go_package = "./proto";
+
+message CalculateRequest {
+  float a = 1;
+  float b = 2;
+  string operation = 3;  // "add", "subtract", "multiply", "divide"
+}
+
+message CalculateResponse {
+  float result = 1;
+  string operation = 2;
+}
+
+message SquareRootRequest {
+  float number = 1;
+}
+
+message SquareRootResponse {
+  float result = 1;
+}
+
+message HistoryRequest {
+  // Empty - get all history
+}
+
+message HistoryResponse {
+  repeated string calculations = 1;
+  int32 count = 2;
+}
+
+service Calculator {
+  rpc Calculate(CalculateRequest) returns (CalculateResponse);
+  rpc SquareRoot(SquareRootRequest) returns (SquareRootResponse);
+  rpc GetHistory(HistoryRequest) returns (HistoryResponse);
+}
+```
+
+- **proto/calculator.pb.go**
+
+```
+// Code generated by protoc-gen-go. DO NOT EDIT.
+// versions:
+// 	protoc-gen-go v1.36.11
+// 	protoc        v7.34.1
+// source: calculator.proto
+
+package proto
+
+import (
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	reflect "reflect"
+	sync "sync"
+	unsafe "unsafe"
+)
+
+const (
+	// Verify that this generated code is sufficiently up-to-date.
+	_ = protoimpl.EnforceVersion(20 - protoimpl.MinVersion)
+	// Verify that runtime/protoimpl is sufficiently up-to-date.
+	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
+)
+
+type CalculateRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	A             float32                `protobuf:"fixed32,1,opt,name=a,proto3" json:"a,omitempty"`
+	B             float32                `protobuf:"fixed32,2,opt,name=b,proto3" json:"b,omitempty"`
+	Operation     string                 `protobuf:"bytes,3,opt,name=operation,proto3" json:"operation,omitempty"` // "add", "subtract", "multiply", "divide"
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CalculateRequest) Reset() {
+	*x = CalculateRequest{}
+	mi := &file_calculator_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CalculateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CalculateRequest) ProtoMessage() {}
+
+func (x *CalculateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_calculator_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CalculateRequest.ProtoReflect.Descriptor instead.
+func (*CalculateRequest) Descriptor() ([]byte, []int) {
+	return file_calculator_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *CalculateRequest) GetA() float32 {
+	if x != nil {
+		return x.A
+	}
+	return 0
+}
+
+func (x *CalculateRequest) GetB() float32 {
+	if x != nil {
+		return x.B
+	}
+	return 0
+}
+
+func (x *CalculateRequest) GetOperation() string {
+	if x != nil {
+		return x.Operation
+	}
+	return ""
+}
+
+type CalculateResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        float32                `protobuf:"fixed32,1,opt,name=result,proto3" json:"result,omitempty"`
+	Operation     string                 `protobuf:"bytes,2,opt,name=operation,proto3" json:"operation,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CalculateResponse) Reset() {
+	*x = CalculateResponse{}
+	mi := &file_calculator_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CalculateResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CalculateResponse) ProtoMessage() {}
+
+func (x *CalculateResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_calculator_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CalculateResponse.ProtoReflect.Descriptor instead.
+func (*CalculateResponse) Descriptor() ([]byte, []int) {
+	return file_calculator_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *CalculateResponse) GetResult() float32 {
+	if x != nil {
+		return x.Result
+	}
+	return 0
+}
+
+func (x *CalculateResponse) GetOperation() string {
+	if x != nil {
+		return x.Operation
+	}
+	return ""
+}
+
+type SquareRootRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Number        float32                `protobuf:"fixed32,1,opt,name=number,proto3" json:"number,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SquareRootRequest) Reset() {
+	*x = SquareRootRequest{}
+	mi := &file_calculator_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SquareRootRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SquareRootRequest) ProtoMessage() {}
+
+func (x *SquareRootRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_calculator_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SquareRootRequest.ProtoReflect.Descriptor instead.
+func (*SquareRootRequest) Descriptor() ([]byte, []int) {
+	return file_calculator_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *SquareRootRequest) GetNumber() float32 {
+	if x != nil {
+		return x.Number
+	}
+	return 0
+}
+
+type SquareRootResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        float32                `protobuf:"fixed32,1,opt,name=result,proto3" json:"result,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SquareRootResponse) Reset() {
+	*x = SquareRootResponse{}
+	mi := &file_calculator_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SquareRootResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SquareRootResponse) ProtoMessage() {}
+
+func (x *SquareRootResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_calculator_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SquareRootResponse.ProtoReflect.Descriptor instead.
+func (*SquareRootResponse) Descriptor() ([]byte, []int) {
+	return file_calculator_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *SquareRootResponse) GetResult() float32 {
+	if x != nil {
+		return x.Result
+	}
+	return 0
+}
+
+type HistoryRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HistoryRequest) Reset() {
+	*x = HistoryRequest{}
+	mi := &file_calculator_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HistoryRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HistoryRequest) ProtoMessage() {}
+
+func (x *HistoryRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_calculator_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HistoryRequest.ProtoReflect.Descriptor instead.
+func (*HistoryRequest) Descriptor() ([]byte, []int) {
+	return file_calculator_proto_rawDescGZIP(), []int{4}
+}
+
+type HistoryResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Calculations  []string               `protobuf:"bytes,1,rep,name=calculations,proto3" json:"calculations,omitempty"`
+	Count         int32                  `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HistoryResponse) Reset() {
+	*x = HistoryResponse{}
+	mi := &file_calculator_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HistoryResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HistoryResponse) ProtoMessage() {}
+
+func (x *HistoryResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_calculator_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HistoryResponse.ProtoReflect.Descriptor instead.
+func (*HistoryResponse) Descriptor() ([]byte, []int) {
+	return file_calculator_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *HistoryResponse) GetCalculations() []string {
+	if x != nil {
+		return x.Calculations
+	}
+	return nil
+}
+
+func (x *HistoryResponse) GetCount() int32 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+var File_calculator_proto protoreflect.FileDescriptor
+
+const file_calculator_proto_rawDesc = "" +
+	"\n" +
+	"\x10calculator.proto\x12\n" +
+	"calculator\"L\n" +
+	"\x10CalculateRequest\x12\f\n" +
+	"\x01a\x18\x01 \x01(\x02R\x01a\x12\f\n" +
+	"\x01b\x18\x02 \x01(\x02R\x01b\x12\x1c\n" +
+	"\toperation\x18\x03 \x01(\tR\toperation\"I\n" +
+	"\x11CalculateResponse\x12\x16\n" +
+	"\x06result\x18\x01 \x01(\x02R\x06result\x12\x1c\n" +
+	"\toperation\x18\x02 \x01(\tR\toperation\"+\n" +
+	"\x11SquareRootRequest\x12\x16\n" +
+	"\x06number\x18\x01 \x01(\x02R\x06number\",\n" +
+	"\x12SquareRootResponse\x12\x16\n" +
+	"\x06result\x18\x01 \x01(\x02R\x06result\"\x10\n" +
+	"\x0eHistoryRequest\"K\n" +
+	"\x0fHistoryResponse\x12\"\n" +
+	"\fcalculations\x18\x01 \x03(\tR\fcalculations\x12\x14\n" +
+	"\x05count\x18\x02 \x01(\x05R\x05count2\xea\x01\n" +
+	"\n" +
+	"Calculator\x12H\n" +
+	"\tCalculate\x12\x1c.calculator.CalculateRequest\x1a\x1d.calculator.CalculateResponse\x12K\n" +
+	"\n" +
+	"SquareRoot\x12\x1d.calculator.SquareRootRequest\x1a\x1e.calculator.SquareRootResponse\x12E\n" +
+	"\n" +
+	"GetHistory\x12\x1a.calculator.HistoryRequest\x1a\x1b.calculator.HistoryResponseB\tZ\a./protob\x06proto3"
+
+var (
+	file_calculator_proto_rawDescOnce sync.Once
+	file_calculator_proto_rawDescData []byte
+)
+
+func file_calculator_proto_rawDescGZIP() []byte {
+	file_calculator_proto_rawDescOnce.Do(func() {
+		file_calculator_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_calculator_proto_rawDesc), len(file_calculator_proto_rawDesc)))
+	})
+	return file_calculator_proto_rawDescData
+}
+
+var file_calculator_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_calculator_proto_goTypes = []any{
+	(*CalculateRequest)(nil),   // 0: calculator.CalculateRequest
+	(*CalculateResponse)(nil),  // 1: calculator.CalculateResponse
+	(*SquareRootRequest)(nil),  // 2: calculator.SquareRootRequest
+	(*SquareRootResponse)(nil), // 3: calculator.SquareRootResponse
+	(*HistoryRequest)(nil),     // 4: calculator.HistoryRequest
+	(*HistoryResponse)(nil),    // 5: calculator.HistoryResponse
+}
+var file_calculator_proto_depIdxs = []int32{
+	0, // 0: calculator.Calculator.Calculate:input_type -> calculator.CalculateRequest
+	2, // 1: calculator.Calculator.SquareRoot:input_type -> calculator.SquareRootRequest
+	4, // 2: calculator.Calculator.GetHistory:input_type -> calculator.HistoryRequest
+	1, // 3: calculator.Calculator.Calculate:output_type -> calculator.CalculateResponse
+	3, // 4: calculator.Calculator.SquareRoot:output_type -> calculator.SquareRootResponse
+	5, // 5: calculator.Calculator.GetHistory:output_type -> calculator.HistoryResponse
+	3, // [3:6] is the sub-list for method output_type
+	0, // [0:3] is the sub-list for method input_type
+	0, // [0:0] is the sub-list for extension type_name
+	0, // [0:0] is the sub-list for extension extendee
+	0, // [0:0] is the sub-list for field type_name
+}
+
+func init() { file_calculator_proto_init() }
+func file_calculator_proto_init() {
+	if File_calculator_proto != nil {
+		return
+	}
+	type x struct{}
+	out := protoimpl.TypeBuilder{
+		File: protoimpl.DescBuilder{
+			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_calculator_proto_rawDesc), len(file_calculator_proto_rawDesc)),
+			NumEnums:      0,
+			NumMessages:   6,
+			NumExtensions: 0,
+			NumServices:   1,
+		},
+		GoTypes:           file_calculator_proto_goTypes,
+		DependencyIndexes: file_calculator_proto_depIdxs,
+		MessageInfos:      file_calculator_proto_msgTypes,
+	}.Build()
+	File_calculator_proto = out.File
+	file_calculator_proto_goTypes = nil
+	file_calculator_proto_depIdxs = nil
+}
+```
+
+
+- **proto/calculator_grpc.pb.go**
+
+```
+// Code generated by protoc-gen-go-grpc. DO NOT EDIT.
+// versions:
+// - protoc-gen-go-grpc v1.6.1
+// - protoc             v7.34.1
+// source: calculator.proto
+
+package proto
+
+import (
+	context "context"
+	grpc "google.golang.org/grpc"
+	codes "google.golang.org/grpc/codes"
+	status "google.golang.org/grpc/status"
+)
+
+// This is a compile-time assertion to ensure that this generated file
+// is compatible with the grpc package it is being compiled against.
+// Requires gRPC-Go v1.64.0 or later.
+const _ = grpc.SupportPackageIsVersion9
+
+const (
+	Calculator_Calculate_FullMethodName  = "/calculator.Calculator/Calculate"
+	Calculator_SquareRoot_FullMethodName = "/calculator.Calculator/SquareRoot"
+	Calculator_GetHistory_FullMethodName = "/calculator.Calculator/GetHistory"
+)
+
+// CalculatorClient is the client API for Calculator service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+type CalculatorClient interface {
+	Calculate(ctx context.Context, in *CalculateRequest, opts ...grpc.CallOption) (*CalculateResponse, error)
+	SquareRoot(ctx context.Context, in *SquareRootRequest, opts ...grpc.CallOption) (*SquareRootResponse, error)
+	GetHistory(ctx context.Context, in *HistoryRequest, opts ...grpc.CallOption) (*HistoryResponse, error)
+}
+
+type calculatorClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewCalculatorClient(cc grpc.ClientConnInterface) CalculatorClient {
+	return &calculatorClient{cc}
+}
+
+func (c *calculatorClient) Calculate(ctx context.Context, in *CalculateRequest, opts ...grpc.CallOption) (*CalculateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CalculateResponse)
+	err := c.cc.Invoke(ctx, Calculator_Calculate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *calculatorClient) SquareRoot(ctx context.Context, in *SquareRootRequest, opts ...grpc.CallOption) (*SquareRootResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SquareRootResponse)
+	err := c.cc.Invoke(ctx, Calculator_SquareRoot_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *calculatorClient) GetHistory(ctx context.Context, in *HistoryRequest, opts ...grpc.CallOption) (*HistoryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(HistoryResponse)
+	err := c.cc.Invoke(ctx, Calculator_GetHistory_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// CalculatorServer is the server API for Calculator service.
+// All implementations must embed UnimplementedCalculatorServer
+// for forward compatibility.
+type CalculatorServer interface {
+	Calculate(context.Context, *CalculateRequest) (*CalculateResponse, error)
+	SquareRoot(context.Context, *SquareRootRequest) (*SquareRootResponse, error)
+	GetHistory(context.Context, *HistoryRequest) (*HistoryResponse, error)
+	mustEmbedUnimplementedCalculatorServer()
+}
+
+// UnimplementedCalculatorServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedCalculatorServer struct{}
+
+func (UnimplementedCalculatorServer) Calculate(context.Context, *CalculateRequest) (*CalculateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Calculate not implemented")
+}
+func (UnimplementedCalculatorServer) SquareRoot(context.Context, *SquareRootRequest) (*SquareRootResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SquareRoot not implemented")
+}
+func (UnimplementedCalculatorServer) GetHistory(context.Context, *HistoryRequest) (*HistoryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetHistory not implemented")
+}
+func (UnimplementedCalculatorServer) mustEmbedUnimplementedCalculatorServer() {}
+func (UnimplementedCalculatorServer) testEmbeddedByValue()                    {}
+
+// UnsafeCalculatorServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to CalculatorServer will
+// result in compilation errors.
+type UnsafeCalculatorServer interface {
+	mustEmbedUnimplementedCalculatorServer()
+}
+
+func RegisterCalculatorServer(s grpc.ServiceRegistrar, srv CalculatorServer) {
+	// If the following call panics, it indicates UnimplementedCalculatorServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&Calculator_ServiceDesc, srv)
+}
+
+func _Calculator_Calculate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CalculateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CalculatorServer).Calculate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Calculator_Calculate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CalculatorServer).Calculate(ctx, req.(*CalculateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Calculator_SquareRoot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SquareRootRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CalculatorServer).SquareRoot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Calculator_SquareRoot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CalculatorServer).SquareRoot(ctx, req.(*SquareRootRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Calculator_GetHistory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HistoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CalculatorServer).GetHistory(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Calculator_GetHistory_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CalculatorServer).GetHistory(ctx, req.(*HistoryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// Calculator_ServiceDesc is the grpc.ServiceDesc for Calculator service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var Calculator_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "calculator.Calculator",
+	HandlerType: (*CalculatorServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "Calculate",
+			Handler:    _Calculator_Calculate_Handler,
+		},
+		{
+			MethodName: "SquareRoot",
+			Handler:    _Calculator_SquareRoot_Handler,
+		},
+		{
+			MethodName: "GetHistory",
+			Handler:    _Calculator_GetHistory_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "calculator.proto",
+}
+```
