@@ -1445,3 +1445,457 @@ var Calculator_ServiceDesc = grpc.ServiceDesc{
 	Metadata: "calculator.proto",
 }
 ```
+
+
+## Task 3: Book Catalog Service with Database
+
+- **book_service.proto**
+
+```
+syntax = "proto3";
+
+package bookservice;
+
+option go_package = "./proto";
+
+message Book {
+    int32 id = 1;
+    string title = 2;
+    string author = 3;
+    string isbn = 4;
+    float price = 5;
+    int32 stock = 6;
+    int32 published_year = 7;
+}
+
+// TODO: Define GetBookRequest (id)
+message GetBookRequest {
+    int32 id = 1;
+}
+
+// TODO: Define GetBookResponse (book)
+message GetBookResponse {
+    Book book = 1;
+}
+
+// TODO: Define CreateBookRequest (all fields except id)
+message CreateBookRequest {
+    string title = 1;
+    string author = 2;
+    string isbn = 3;
+    float price = 4;
+    int32 stock = 5;
+    int32 published_year = 6;
+}
+
+// TODO: Define CreateBookResponse (book)
+message CreateBookResponse {
+    Book book = 1;
+}
+
+// TODO: Define UpdateBookRequest (all fields including id)
+message UpdateBookRequest {
+    int32 id = 1;
+    string title = 2;
+    string author = 3;
+    string isbn = 4;
+    float price = 5;
+    int32 stock = 6;
+    int32 published_year = 7;    
+}
+
+// TODO: Define UpdateBookResponse (book)
+message UpdateBookResponse {
+    Book book = 1;
+}
+
+
+// TODO: Define DeleteBookRequest (id)
+message DeleteBookRequest {
+    int32 id = 1;
+}
+
+// TODO: Define DeleteBookResponse (success, message)
+message DeleteBookResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+// TODO: Define ListBooksRequest (page, page_size)
+message ListBooksRequest {
+    int32 page = 1;
+    int32 page_size = 2;
+}
+
+
+// TODO: Define ListBooksResponse (books, total, page, page_size)
+message ListBooksResponse {
+    repeated Book books = 1;
+    int32 total = 2;
+    int32 page = 3;
+    int32 page_size = 4;
+}
+
+service BookCatalog {
+  rpc GetBook(GetBookRequest) returns (GetBookResponse);
+  rpc CreateBook(CreateBookRequest) returns (CreateBookResponse);
+  rpc UpdateBook(UpdateBookRequest) returns (UpdateBookResponse);
+  rpc DeleteBook(DeleteBookRequest) returns (DeleteBookResponse);
+  rpc ListBooks(ListBooksRequest) returns (ListBooksResponse);
+}
+```
+
+
+- **server/main.go**
+
+```
+package main
+
+import (
+	"context"
+	"database/sql"
+	"log"
+	"net"
+
+	pb "book-catalog-grpc/proto"
+
+	_ "github.com/mattn/go-sqlite3"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
+
+type bookCatalogServer struct {
+	pb.UnimplementedBookCatalogServer
+	db *sql.DB
+}
+
+func (s *bookCatalogServer) GetBook(ctx context.Context, req *pb.GetBookRequest) (*pb.GetBookResponse, error) {
+	// TODO: Query book from database
+	query := "SELECT id, title, author, isbn, price, stock, published_year FROM books WHERE id = ?"
+	var b pb.Book
+	err := s.db.QueryRowContext(ctx, query, req.Id).Scan(&b.Id, &b.Title, &b.Author, &b.Isbn, &b.Price, &b.Stock, &b.PublishedYear)
+	// TODO: Handle not found case
+	if err == sql.ErrNoRows {
+		return nil, status.Errorf(codes.NotFound, "Book with ID %d not found", req.Id)
+	}
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Database error: %v", err)
+	}
+	// TODO: Return book
+	return &pb.GetBookResponse{Book: &b}, nil
+}
+
+func (s *bookCatalogServer) CreateBook(ctx context.Context, req *pb.CreateBookRequest) (*pb.CreateBookResponse, error) {
+	// TODO: Validate input
+	if req.Title == "" || req.Author == "" || req.Isbn == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid input")
+	}
+
+	// TODO: Insert into database
+	query := "INSERT INTO books (title, author, isbn, price, stock, published_year) VALUES (?, ?, ?, ?, ?, ?)"
+	result, err := s.db.ExecContext(ctx, query, req.Title, req.Author, req.Isbn, req.Price, req.Stock, req.PublishedYear)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to insert book: %v", err)
+	}
+
+	// TODO: Return created book with ID
+	id, _ := result.LastInsertId()
+	return &pb.CreateBookResponse{
+		Book: &pb.Book{
+			Id:            int32(id),
+			Title:         req.Title,
+			Author:        req.Author,
+			Isbn:          req.Isbn,
+			Price:         req.Price,
+			Stock:         req.Stock,
+			PublishedYear: req.PublishedYear,
+		},
+	}, nil
+}
+
+func (s *bookCatalogServer) UpdateBook(ctx context.Context, req *pb.UpdateBookRequest) (*pb.UpdateBookResponse, error) {
+	// TODO: Validate input
+	if req.Id == 0 || req.Title == "" || req.Author == "" || req.Isbn == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid input")
+	}
+
+	// TODO: Update in database
+	query := "UPDATE books SET title = ?, author = ?, isbn = ?, price = ?, stock = ?, published_year = ? WHERE id = ?"
+	result, err := s.db.ExecContext(ctx, query, req.Title, req.Author, req.Isbn, req.Price, req.Stock, req.PublishedYear, req.Id)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to update book: %v", err)
+	}
+	// TODO: Check if exists (RowsAffected)
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return nil, status.Errorf(codes.NotFound, "Book ID %d not found", req.Id)
+	}
+
+	// TODO: Return updated book
+	return &pb.UpdateBookResponse{
+		Book: &pb.Book{
+			Id:            req.Id,
+			Title:         req.Title,
+			Author:        req.Author,
+			Isbn:          req.Isbn,
+			Price:         req.Price,
+			Stock:         req.Stock,
+			PublishedYear: req.PublishedYear,
+		},
+	}, nil
+}
+
+func (s *bookCatalogServer) DeleteBook(ctx context.Context, req *pb.DeleteBookRequest) (*pb.DeleteBookResponse, error) {
+	// TODO: Delete from database
+	query := "DELETE FROM books where id = ?"
+	result, err := s.db.ExecContext(ctx, query, req.Id)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to delete book: %v", err)
+	}
+
+	// TODO: Check if exists
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return nil, status.Errorf(codes.NotFound, "Book with ID %d not found", req.Id)
+	}
+
+	// TODO: Return success response
+	return &pb.DeleteBookResponse{
+		Success: true,
+		Message: "Book deleted successfully!",
+	}, nil
+}
+
+func (s *bookCatalogServer) ListBooks(ctx context.Context, req *pb.ListBooksRequest) (*pb.ListBooksResponse, error) {
+	// TODO: Implement pagination
+	if req.Page <= 0 {
+		req.Page = 1
+	}
+	if req.PageSize <= 0 {
+		req.PageSize = 10
+	}
+
+	// TODO: Get total count
+	var total int64
+	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM books").Scan(&total)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to get count: %v", err)
+	}
+
+	// TODO: Query books with LIMIT/OFFSET
+	offset := (req.Page - 1) * req.PageSize
+	query := "SELECT id, title, author, isbn, price, stock, published_year FROM books LIMIT ? OFFSET ?"
+	rows, err := s.db.QueryContext(ctx, query, req.PageSize, offset)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to list books: %v", err)
+	}
+	defer rows.Close()
+
+	// TODO: Return response
+	var books []*pb.Book
+	for rows.Next() {
+		var b pb.Book
+		rows.Scan(&b.Id, &b.Title, &b.Author, &b.Isbn, &b.Price, &b.Stock, &b.PublishedYear)
+		books = append(books, &b)
+	}
+	return &pb.ListBooksResponse{
+		Books: books,
+		Total: int32(total),
+	}, nil
+}
+
+func initDB() (*sql.DB, error) {
+	db, err := sql.Open("sqlite3", "./books.db")
+	if err != nil {
+		return nil, err
+	}
+
+	// TODO: Create books table
+	schema := `
+		CREATE TABLE IF NOT EXISTS books (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			title TEXT NOT NULL,
+			author TEXT NOT NULL,
+			isbn TEXT NOT NULL,
+			price REAL NOT NULL,
+			stock INTEGER NOT NULL,
+			published_year INTEGER NOT NULL
+		)
+	`
+	if _, err = db.Exec(schema); err != nil {
+		return nil, err
+	}
+
+	// TODO: Seed sample data (5+ books)
+	var count int
+	db.QueryRow("SELECT COUNT(*) FROM books").Scan(&count)
+	if count == 0 {
+		books := []struct {
+			title, author, isbn string
+			price               float32
+			stock, year         int
+		}{
+			{"The Go Programming Language", "Alan Donovan", "978-0134190440", 39.99, 10, 2015},
+			{"Clean Code", "Robert Martin", "978-0132350884", 42.50, 5, 2008},
+			{"The Pragmatic Programmer", "Andrew Hunt", "978-0135957059", 45.00, 8, 1999},
+			{"Refactoring", "Martin Fowler", "978-0134757599", 44.99, 12, 2018},
+			{"Designing Data-Intensive Applications", "Martin Kleppmann", "978-1449373320", 48.00, 15, 2017},
+		}
+		for _, b := range books {
+			db.Exec("INSERT INTO books (title, author, isbn, price, stock, published_year) VALUES (?, ?, ?, ?, ?, ?)",
+				b.title, b.author, b.isbn, b.price, b.stock, b.year)
+		}
+	}
+	return db, nil
+}
+
+func main() {
+	// TODO: Initialize database
+	db, err := initDB()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// TODO: Create listener
+	listener, err := net.Listen("tcp", ":50051")
+	if err != nil {
+		log.Fatalf("Failed to listen: %v", err)
+	}
+
+	// TODO: Create gRPC server
+	grpcServer := grpc.NewServer()
+
+	// TODO: Register service
+	pb.RegisterBookCatalogServer(grpcServer, &bookCatalogServer{db: db})
+
+	// TODO: Start serving
+	log.Printf("Server is listening at %v", listener.Addr())
+	if err := grpcServer.Serve(listener); err != nil {
+		log.Fatalf("Failed to serve: %v", err)
+	}
+}
+```
+
+- **client/main.go**
+
+```
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"time"
+
+	pb "book-catalog-grpc/proto"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+)
+
+func main() {
+	// TODO: Connect to server
+	conn, err := grpc.Dial("localhost:50051",
+		grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Fatalf("Failed to connect: %v", err)
+	}
+	defer conn.Close()
+
+	client := pb.NewBookCatalogClient(conn)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+
+	// List all books
+	fmt.Println("=== Test 1: List ALL books ===")
+	resp, err := client.ListBooks(ctx, &pb.ListBooksRequest{
+		Page:     1,
+		PageSize: 10,
+	})
+
+	if err != nil {
+		log.Fatalf("Failed to list all books: %v", err)
+	}
+
+	fmt.Printf("Total Books: %d\n", resp.Total)
+	for _, b := range resp.Books {
+		fmt.Printf("%d. %s by %s - $%.2f\n", b.Id, b.Title, b.Author, b.Price)
+	}
+
+	// Get book
+	fmt.Println("\n=== Test 2: Get Book ===")
+	getResp, err := client.GetBook(ctx, &pb.GetBookRequest{Id: 1})
+	if err != nil {
+		log.Fatalf("Failed to get book: %v", err)
+	}
+
+	fmt.Printf("Book ID: %d\nTitle: %s\nAuthor: %s\nPrice: %.2f\n", getResp.Book.Id, getResp.Book.Title, getResp.Book.Author, getResp.Book.Price)
+
+	// Create book
+	fmt.Println("\n=== Test 3: Create Book ===")
+	createResp, err := client.CreateBook(ctx, &pb.CreateBookRequest{
+		Title:         "Learning Go",
+		Author:        "Jon Bodner",
+		Isbn:          "978-1492077213",
+		Price:         29.99,
+		Stock:         7,
+		PublishedYear: 2021,
+	})
+	if err != nil {
+		log.Fatalf("Failed to create book: %v", err)
+	}
+
+	fmt.Printf("Created Book ID: %d\nTitle: %s\n", createResp.Book.Id, createResp.Book.Title)
+
+	// Update book
+	fmt.Println("\n=== Test 4: Update Book ===")
+	updateResp, err := client.UpdateBook(ctx, &pb.UpdateBookRequest{
+		Id:            1,
+		Title:         "The Go Programming Language (2nd Edition)",
+		Author:        "Alan Donovan",
+		Isbn:          "978-0134190440",
+		Price:         35.99,
+		Stock:         10,
+		PublishedYear: 2016,
+	})
+	if err != nil {
+		log.Fatalf("Failed to update book: %v", err)
+	}
+
+	fmt.Printf("Updated book: %s\nNew price: $%.2f\n", updateResp.Book.Title, updateResp.Book.Price)
+
+	// Delete book
+	fmt.Println("\n=== Test 5: Delete Book ===")
+	deleteResp, err := client.DeleteBook(ctx, &pb.DeleteBookRequest{
+		Id: 1,
+	})
+	if err != nil {
+		log.Fatalf("Failed to delete book: %v", err)
+	}
+
+	fmt.Println("Book deleted successfully:", deleteResp.Success)
+
+	// Pagination
+	fmt.Println("\n=== Test 6: Pagination ===")
+	paginatedResp1, err := client.ListBooks(ctx, &pb.ListBooksRequest{
+		Page:     1,
+		PageSize: 3,
+	})
+	if err != nil {
+		log.Fatalf("Failed to list books with pagination: %v", err)
+	}
+	fmt.Printf("Page 1: %d books\n", len(paginatedResp1.Books))
+
+	paginatedResp2, err := client.ListBooks(ctx, &pb.ListBooksRequest{
+		Page:     2,
+		PageSize: 2,
+	})
+	if err != nil {
+		log.Fatalf("Failed to list books with pagination: %v", err)
+	}
+	fmt.Printf("Page 2: %d books\n", len(paginatedResp2.Books))
+
+}
+```
