@@ -10,95 +10,109 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/status"
 )
 
 func main() {
 	// TODO: Connect to server
-	conn, err := grpc.NewClient("localhost:50051",
+	conn, err := grpc.Dial("localhost:50051",
 		grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Fatalf("Failed to connect: %v", err)
 	}
 	defer conn.Close()
 
-	client := pb.NewCalculatorClient(conn)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	client := pb.NewBookCatalogClient(conn)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
 
-	// Test 1: Addition
-	fmt.Println("=== Test 1: Addition ===")
-	resp, err := client.Calculate(ctx, &pb.CalculateRequest{
-		A:         10,
-		B:         5,
-		Operation: "add",
+	// List all books
+	fmt.Println("=== Test 1: List ALL books ===")
+	resp, err := client.ListBooks(ctx, &pb.ListBooksRequest{
+		Page:     1,
+		PageSize: 10,
 	})
-	// TODO: Handle error and print result
+
 	if err != nil {
-		log.Fatal("Calculation add failed: ", err)
+		log.Fatalf("Failed to list all books: %v", err)
 	}
 
-	fmt.Printf("Result: %.2f + %.2f = %.2f", 10.0, 5.0, resp.Result)
-
-	// Test 2: Division
-	fmt.Println("\n=== Test 2: Division ===")
-	// TODO: Test 20 / 4
-	resp, err = client.Calculate(ctx, &pb.CalculateRequest{
-		A:         20,
-		B:         4,
-		Operation: "divide",
-	})
-	if err != nil {
-		log.Fatal("Calculation divide failed: ", err)
+	fmt.Printf("Total Books: %d\n", resp.Total)
+	for _, b := range resp.Books {
+		fmt.Printf("%d. %s by %s - $%.2f\n", b.Id, b.Title, b.Author, b.Price)
 	}
 
-	fmt.Printf("Result: %.2f / %.2f = %.2f", 20.0, 4.0, resp.Result)
-
-	// Test 3: Division by zero (should error)
-	fmt.Println("\n=== Test 3: Division by Zero ===")
-	_, err = client.Calculate(ctx, &pb.CalculateRequest{
-		A:         10,
-		B:         0,
-		Operation: "divide",
-	})
+	// Get book
+	fmt.Println("\n=== Test 2: Get Book ===")
+	getResp, err := client.GetBook(ctx, &pb.GetBookRequest{Id: 1})
 	if err != nil {
-		st, _ := status.FromError(err)
-		fmt.Printf("Expected error: %s\n", st.Message())
+		log.Fatalf("Failed to get book: %v", err)
 	}
 
-	// Test 4: Square root
-	fmt.Println("\n=== Test 4: Square Root ===")
-	// TODO: Test sqrt(16)
-	sqrtResp, err := client.SquareRoot(ctx, &pb.SquareRootRequest{
-		Number: 16,
+	fmt.Printf("Book ID: %d\nTitle: %s\nAuthor: %s\nPrice: %.2f\n", getResp.Book.Id, getResp.Book.Title, getResp.Book.Author, getResp.Book.Price)
+
+	// Create book
+	fmt.Println("\n=== Test 3: Create Book ===")
+	createResp, err := client.CreateBook(ctx, &pb.CreateBookRequest{
+		Title:         "Learning Go",
+		Author:        "Jon Bodner",
+		Isbn:          "978-1492077213",
+		Price:         29.99,
+		Stock:         7,
+		PublishedYear: 2021,
 	})
 	if err != nil {
-		log.Fatal("Square root calculation failed: ", err)
+		log.Fatalf("Failed to create book: %v", err)
 	}
 
-	fmt.Printf("Result: sqrt(%.2f) = %.2f", 16.0, sqrtResp.Result)
+	fmt.Printf("Created Book ID: %d\nTitle: %s\n", createResp.Book.Id, createResp.Book.Title)
 
-	// Test 5: Negative square root (should error)
-	fmt.Println("\n=== Test 5: Negative Square Root ===")
-	// TODO: Test sqrt(-4), should error
-	_, err = client.SquareRoot(ctx, &pb.SquareRootRequest{
-		Number: -4,
+	// Update book
+	fmt.Println("\n=== Test 4: Update Book ===")
+	updateResp, err := client.UpdateBook(ctx, &pb.UpdateBookRequest{
+		Id:            1,
+		Title:         "The Go Programming Language (2nd Edition)",
+		Author:        "Alan Donovan",
+		Isbn:          "978-0134190440",
+		Price:         35.99,
+		Stock:         10,
+		PublishedYear: 2016,
 	})
 	if err != nil {
-		st, _ := status.FromError(err)
-		fmt.Printf("Expected error: %s\n", st.Message())
+		log.Fatalf("Failed to update book: %v", err)
 	}
 
-	// Test 6: Get history
-	fmt.Println("\n=== Test 6: History ===")
-	// TODO: Get and print all calculations
-	historyResp, err := client.GetHistory(ctx, &pb.HistoryRequest{})
+	fmt.Printf("Updated book: %s\nNew price: $%.2f\n", updateResp.Book.Title, updateResp.Book.Price)
 
+	// Delete book
+	fmt.Println("\n=== Test 5: Delete Book ===")
+	deleteResp, err := client.DeleteBook(ctx, &pb.DeleteBookRequest{
+		Id: 1,
+	})
 	if err != nil {
-		log.Fatal("Failed to get history: ", err)
+		log.Fatalf("Failed to delete book: %v", err)
 	}
 
-	for i, h := range historyResp.GetCalculations() {
-		fmt.Printf("%d. %s\n", i+1, h)
+	fmt.Println("Book deleted successfully:", deleteResp.Success)
+
+	// Pagination
+	fmt.Println("\n=== Test 6: Pagination ===")
+	paginatedResp1, err := client.ListBooks(ctx, &pb.ListBooksRequest{
+		Page:     1,
+		PageSize: 3,
+	})
+	if err != nil {
+		log.Fatalf("Failed to list books with pagination: %v", err)
 	}
+	fmt.Printf("Page 1: %d books\n", len(paginatedResp1.Books))
+
+	paginatedResp2, err := client.ListBooks(ctx, &pb.ListBooksRequest{
+		Page:     2,
+		PageSize: 2,
+	})
+	if err != nil {
+		log.Fatalf("Failed to list books with pagination: %v", err)
+	}
+	fmt.Printf("Page 2: %d books\n", len(paginatedResp2.Books))
+
 }

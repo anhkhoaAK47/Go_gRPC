@@ -2,107 +2,225 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"database/sql"
 	"log"
-	"math"
 	"net"
-	
+
 	pb "book-catalog-grpc/proto"
+
+	_ "github.com/mattn/go-sqlite3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-type calculatorServer struct {
-	pb.UnimplementedCalculatorServer
-	history []string  // Store calculation history
+type bookCatalogServer struct {
+	pb.UnimplementedBookCatalogServer
+	db *sql.DB
 }
 
-func (s *calculatorServer) Calculate(ctx context.Context, req *pb.CalculateRequest) (*pb.CalculateResponse, error) {
-	log.Printf("Calculate: %.2f %s %.2f", req.A, req.Operation, req.B)
-	
-	var result float32
-	
-	// TODO: Implement operations
-	switch req.Operation {
-	case "add":
-		// TODO: result = a + b
-		result = req.A + req.B
-	case "subtract":
-		// TODO: result = a - b
-		result = req.A - req.B
-	case "multiply":
-		// TODO: result = a * b
-		result = req.A * req.B
-	case "divide":
-		// TODO: Check if b == 0, return error if so
-		if req.B == 0 {
-			return nil, status.Error(codes.InvalidArgument, "cannot divide by 0")
+func (s *bookCatalogServer) GetBook(ctx context.Context, req *pb.GetBookRequest) (*pb.GetBookResponse, error) {
+	// TODO: Query book from database
+	query := "SELECT id, title, author, isbn, price, stock, published_year FROM books WHERE id = ?"
+	var b pb.Book
+	err := s.db.QueryRowContext(ctx, query, req.Id).Scan(&b.Id, &b.Title, &b.Author, &b.Isbn, &b.Price, &b.Stock, &b.PublishedYear)
+	// TODO: Handle not found case
+	if err == sql.ErrNoRows {
+		return nil, status.Errorf(codes.NotFound, "Book with ID %d not found", req.Id)
+	}
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Database error: %v", err)
+	}
+	// TODO: Return book
+	return &pb.GetBookResponse{Book: &b}, nil
+}
+
+func (s *bookCatalogServer) CreateBook(ctx context.Context, req *pb.CreateBookRequest) (*pb.CreateBookResponse, error) {
+	// TODO: Validate input
+	if req.Title == "" || req.Author == "" || req.Isbn == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid input")
+	}
+
+	// TODO: Insert into database
+	query := "INSERT INTO books (title, author, isbn, price, stock, published_year) VALUES (?, ?, ?, ?, ?, ?)"
+	result, err := s.db.ExecContext(ctx, query, req.Title, req.Author, req.Isbn, req.Price, req.Stock, req.PublishedYear)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to insert book: %v", err)
+	}
+
+	// TODO: Return created book with ID
+	id, _ := result.LastInsertId()
+	return &pb.CreateBookResponse{
+		Book: &pb.Book{
+			Id:            int32(id),
+			Title:         req.Title,
+			Author:        req.Author,
+			Isbn:          req.Isbn,
+			Price:         req.Price,
+			Stock:         req.Stock,
+			PublishedYear: req.PublishedYear,
+		},
+	}, nil
+}
+
+func (s *bookCatalogServer) UpdateBook(ctx context.Context, req *pb.UpdateBookRequest) (*pb.UpdateBookResponse, error) {
+	// TODO: Validate input
+	if req.Id == 0 || req.Title == "" || req.Author == "" || req.Isbn == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid input")
+	}
+
+	// TODO: Update in database
+	query := "UPDATE books SET title = ?, author = ?, isbn = ?, price = ?, stock = ?, published_year = ? WHERE id = ?"
+	result, err := s.db.ExecContext(ctx, query, req.Title, req.Author, req.Isbn, req.Price, req.Stock, req.PublishedYear, req.Id)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to update book: %v", err)
+	}
+	// TODO: Check if exists (RowsAffected)
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return nil, status.Errorf(codes.NotFound, "Book ID %d not found", req.Id)
+	}
+
+	// TODO: Return updated book
+	return &pb.UpdateBookResponse{
+		Book: &pb.Book{
+			Id:            req.Id,
+			Title:         req.Title,
+			Author:        req.Author,
+			Isbn:          req.Isbn,
+			Price:         req.Price,
+			Stock:         req.Stock,
+			PublishedYear: req.PublishedYear,
+		},
+	}, nil
+}
+
+func (s *bookCatalogServer) DeleteBook(ctx context.Context, req *pb.DeleteBookRequest) (*pb.DeleteBookResponse, error) {
+	// TODO: Delete from database
+	query := "DELETE FROM books where id = ?"
+	result, err := s.db.ExecContext(ctx, query, req.Id)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to delete book: %v", err)
+	}
+
+	// TODO: Check if exists
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return nil, status.Errorf(codes.NotFound, "Book with ID %d not found", req.Id)
+	}
+
+	// TODO: Return success response
+	return &pb.DeleteBookResponse{
+		Success: true,
+		Message: "Book deleted successfully!",
+	}, nil
+}
+
+func (s *bookCatalogServer) ListBooks(ctx context.Context, req *pb.ListBooksRequest) (*pb.ListBooksResponse, error) {
+	// TODO: Implement pagination
+	if req.Page <= 0 {
+		req.Page = 1
+	}
+	if req.PageSize <= 0 {
+		req.PageSize = 10
+	}
+
+	// TODO: Get total count
+	var total int64
+	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM books").Scan(&total)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to get count: %v", err)
+	}
+
+	// TODO: Query books with LIMIT/OFFSET
+	offset := (req.Page - 1) * req.PageSize
+	query := "SELECT id, title, author, isbn, price, stock, published_year FROM books LIMIT ? OFFSET ?"
+	rows, err := s.db.QueryContext(ctx, query, req.PageSize, offset)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to list books: %v", err)
+	}
+	defer rows.Close()
+
+	// TODO: Return response
+	var books []*pb.Book
+	for rows.Next() {
+		var b pb.Book
+		rows.Scan(&b.Id, &b.Title, &b.Author, &b.Isbn, &b.Price, &b.Stock, &b.PublishedYear)
+		books = append(books, &b)
+	}
+	return &pb.ListBooksResponse{
+		Books: books,
+		Total: int32(total),
+	}, nil
+}
+
+func initDB() (*sql.DB, error) {
+	db, err := sql.Open("sqlite3", "./books.db")
+	if err != nil {
+		return nil, err
+	}
+
+	// TODO: Create books table
+	schema := `
+		CREATE TABLE IF NOT EXISTS books (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			title TEXT NOT NULL,
+			author TEXT NOT NULL,
+			isbn TEXT NOT NULL,
+			price REAL NOT NULL,
+			stock INTEGER NOT NULL,
+			published_year INTEGER NOT NULL
+		)
+	`
+	if _, err = db.Exec(schema); err != nil {
+		return nil, err
+	}
+
+	// TODO: Seed sample data (5+ books)
+	var count int
+	db.QueryRow("SELECT COUNT(*) FROM books").Scan(&count)
+	if count == 0 {
+		books := []struct {
+			title, author, isbn string
+			price               float32
+			stock, year         int
+		}{
+			{"The Go Programming Language", "Alan Donovan", "978-0134190440", 39.99, 10, 2015},
+			{"Clean Code", "Robert Martin", "978-0132350884", 42.50, 5, 2008},
+			{"The Pragmatic Programmer", "Andrew Hunt", "978-0135957059", 45.00, 8, 1999},
+			{"Refactoring", "Martin Fowler", "978-0134757599", 44.99, 12, 2018},
+			{"Designing Data-Intensive Applications", "Martin Kleppmann", "978-1449373320", 48.00, 15, 2017},
 		}
-		// TODO: result = a / b
-		result = req.A / req.B
-	default:
-		return nil, status.Errorf(codes.InvalidArgument, 
-			"unknown operation: %s", req.Operation)
+		for _, b := range books {
+			db.Exec("INSERT INTO books (title, author, isbn, price, stock, published_year) VALUES (?, ?, ?, ?, ?, ?)",
+				b.title, b.author, b.isbn, b.price, b.stock, b.year)
+		}
 	}
-	
-	// TODO: Add to history
-	historyEntry := fmt.Sprintf("%.2f %s %.2f = %.2f", 
-		req.A, req.Operation, req.B, result)
-	s.history = append(s.history, historyEntry)
-	
-	return &pb.CalculateResponse{
-		Result:    result,
-		Operation: req.Operation,
-	}, nil
-}
-
-func (s *calculatorServer) SquareRoot(ctx context.Context, req *pb.SquareRootRequest) (*pb.SquareRootResponse, error) {
-	log.Printf("SquareRoot: %.2f", req.Number)
-	
-	// TODO: Check if number is negative
-	if req.Number < 0 {
-		return nil, status.Errorf(codes.InvalidArgument,
-			"cannot calculate square root of negative number: %.2f", req.Number)
-	}
-	
-	// TODO: Calculate square root
-	result := float32(math.Sqrt(float64(req.Number)))
-	
-	// TODO: Add to history
-	historyEntry := fmt.Sprintf("sqrt(%.2f) = %.2f", req.Number, result)
-	s.history = append(s.history, historyEntry)
-	
-	return &pb.SquareRootResponse{Result: result}, nil
-}
-
-func (s *calculatorServer) GetHistory(ctx context.Context, req *pb.HistoryRequest) (*pb.HistoryResponse, error) {
-	log.Println("GetHistory called")
-	
-	// TODO: Return history
-	return &pb.HistoryResponse{
-		Calculations: s.history,
-		Count:        int32(len(s.history)),
-	}, nil
+	return db, nil
 }
 
 func main() {
-	// TODO: Create listener on port 50051
-	listener, err := net.Listen("tcp", ":50051")
+	// TODO: Initialize database
+	db, err := initDB()
 	if err != nil {
-		log.Fatal("Failed to listen to :50051", err)
+		log.Fatal(err)
 	}
 
-	fmt.Println("🚀 Calculator gRPC server listening on :50051")
-	
+	// TODO: Create listener
+	listener, err := net.Listen("tcp", ":50051")
+	if err != nil {
+		log.Fatalf("Failed to listen: %v", err)
+	}
+
 	// TODO: Create gRPC server
 	grpcServer := grpc.NewServer()
-	
-	// TODO: Register Calculator service
-	pb.RegisterCalculatorServer(grpcServer, &calculatorServer{})
-	
+
+	// TODO: Register service
+	pb.RegisterBookCatalogServer(grpcServer, &bookCatalogServer{db: db})
+
 	// TODO: Start serving
+	log.Printf("Server is listening at %v", listener.Addr())
 	if err := grpcServer.Serve(listener); err != nil {
-		log.Fatal("Failed to server grpcServer", err)
+		log.Fatalf("Failed to serve: %v", err)
 	}
 }
