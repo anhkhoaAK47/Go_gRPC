@@ -154,6 +154,163 @@ func (s *bookCatalogServer) ListBooks(ctx context.Context, req *pb.ListBooksRequ
 	}, nil
 }
 
+// Task 4: Advanced Search and Error Handling
+func (s *bookCatalogServer) SearchBooks(ctx context.Context, req *pb.SearchBooksRequest) (*pb.SearchBooksResponse, error) {
+	log.Printf("SearchBooks: query=%s, field=%s", req.Query, req.Field)
+
+	// TODO: Validate input
+	if req.Query == "" {
+		return nil, status.Error(codes.InvalidArgument, "search query required")
+	}
+
+	// TODO: Build SQL query based on field
+	var sqlQuery string
+	var args []interface{}
+	searchPattern := "%" + req.Query + "%"
+
+	switch req.Field {
+	case "title":
+		// TODO: Search only in title
+		sqlQuery = "SELECT id, title, author, isbn, price, stock, published_year FROM books WHERE title LIKE ?"
+		args = append(args, searchPattern)
+	case "author":
+		// TODO: Search only in author
+		sqlQuery = "SELECT id, title, author, isbn, price, stock, published_year FROM books WHERE author LIKE ?"
+		args = append(args, searchPattern)
+	case "isbn":
+		// TODO: Search only in ISBN (exact match)
+		sqlQuery = "SELECT id, title, author, isbn, price, stock, published_year FROM books WHERE isbn = ?"
+		args = append(args, req.Query)
+	case "all", "":
+		// TODO: Search in all fields
+		sqlQuery = "SELECT id, title, author, isbn, price, stock, published_year FROM books WHERE title LIKE ? OR author LIKE ? OR isbn LIKE ?"
+		args = append(args, searchPattern, searchPattern, searchPattern)
+	default:
+		return nil, status.Errorf(codes.InvalidArgument, "invalid field: %s", req.Field)
+	}
+
+	// TODO: Execute query
+	rows, err := s.db.QueryContext(ctx, sqlQuery, args...)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to search books: %v", err)
+	}
+	defer rows.Close()
+
+	// TODO: Scan results
+	var books []*pb.Book
+	for rows.Next() {
+		var b pb.Book
+		err := rows.Scan(&b.Id, &b.Title, &b.Author, &b.Isbn, &b.Price, &b.Stock, &b.PublishedYear)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to scan book: %v", err)
+		}
+		books = append(books, &b)
+	}
+
+	// TODO: Return response
+	return &pb.SearchBooksResponse{
+		Books: books,
+		Count: int32(len(books)),
+		Query: req.Query,
+	}, nil
+}
+
+func (s *bookCatalogServer) FilterBooks(ctx context.Context, req *pb.FilterBooksRequest) (*pb.FilterBooksResponse, error) {
+	log.Printf("FilterBooks: price[%.2f-%.2f], year[%d-%d]", req.MinPrice, req.MaxPrice, req.MinYear, req.MaxYear)
+
+	// TODO: Validate ranges
+	if req.MinPrice < 0 || req.MaxPrice < 0 {
+		return nil, status.Error(codes.InvalidArgument, "price cannot be negative")
+	}
+	if req.MaxPrice > 0 && req.MinPrice > req.MaxPrice {
+		return nil, status.Error(codes.InvalidArgument, "min_price cannot be greater than max_price")
+	}
+
+	// TODO: Build dynamic query
+	query := "SELECT id, title, author, isbn, price, stock, published_year FROM books WHERE 1=1"
+	var args []interface{}
+
+	// TODO: Add price filters if provided
+	if req.MinPrice > 0 {
+		query += " AND price >= ?"
+		args = append(args, req.MinPrice)
+	}
+	if req.MaxPrice > 0 {
+		query += " AND price <= ?"
+		args = append(args, req.MaxPrice)
+	}
+
+	// TODO: Add year filters if provided
+	if req.MinYear > 0 {
+		query += " AND published_year >= ?"
+		args = append(args, req.MinYear)
+	}
+	if req.MaxYear > 0 {
+		query += " AND published_year <= ?"
+		args = append(args, req.MaxYear)
+	}
+
+	// TODO: Execute query
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to filter books: %v", err)
+	}
+	defer rows.Close()
+
+	// TODO: Return results
+	var books []*pb.Book
+	for rows.Next() {
+		var b pb.Book
+		err := rows.Scan(&b.Id, &b.Title, &b.Author, &b.Isbn, &b.Price, &b.Stock, &b.PublishedYear)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to scan book: %v", err)
+		}
+		books = append(books, &b)
+	}
+
+	return &pb.FilterBooksResponse{
+		Books: books,
+		Count: int32(len(books)),
+	}, nil
+}
+
+func (s *bookCatalogServer) GetStats(ctx context.Context, req *pb.GetStatsRequest) (*pb.GetStatsResponse, error) {
+	log.Println("GetStats called")
+
+	var stats pb.GetStatsResponse
+
+	// TODO: Get total books
+	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM books").Scan(&stats.TotalBooks)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to count books: %v", err)
+	}
+
+	// If no books, return empty stats
+	if stats.TotalBooks == 0 {
+		return &stats, nil
+	}
+
+	// TODO: Get average price
+	err = s.db.QueryRowContext(ctx, "SELECT AVG(price) FROM books").Scan(&stats.AveragePrice)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get average price: %v", err)
+	}
+
+	// TODO: Get total stock
+	err = s.db.QueryRowContext(ctx, "SELECT SUM(stock) FROM books").Scan(&stats.TotalStock)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get total stock: %v", err)
+	}
+
+	// TODO: Get earliest and latest year
+	err = s.db.QueryRowContext(ctx, "SELECT MIN(published_year), MAX(published_year) FROM books").Scan(&stats.EarliestYear, &stats.LatestYear)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get year range: %v", err)
+	}
+
+	return &stats, nil
+}
+
 func initDB() (*sql.DB, error) {
 	db, err := sql.Open("sqlite3", "./books.db")
 	if err != nil {
@@ -162,16 +319,16 @@ func initDB() (*sql.DB, error) {
 
 	// TODO: Create books table
 	schema := `
-		CREATE TABLE IF NOT EXISTS books (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			title TEXT NOT NULL,
-			author TEXT NOT NULL,
-			isbn TEXT NOT NULL,
-			price REAL NOT NULL,
-			stock INTEGER NOT NULL,
-			published_year INTEGER NOT NULL
-		)
-	`
+			CREATE TABLE IF NOT EXISTS books (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				title TEXT NOT NULL,
+				author TEXT NOT NULL,
+				isbn TEXT NOT NULL,
+				price REAL NOT NULL,
+				stock INTEGER NOT NULL,
+				published_year INTEGER NOT NULL
+			)
+		`
 	if _, err = db.Exec(schema); err != nil {
 		return nil, err
 	}

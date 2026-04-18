@@ -82,10 +82,49 @@ message ListBooksResponse {
     int32 page_size = 4;
 }
 
+// Task 4: Advanced Search and Error Handling
+message SearchBooksRequest {
+  string query = 1;
+  string field = 2;  // "title", "author", "isbn", or "all"
+}
+
+message SearchBooksResponse {
+  repeated Book books = 1;
+  int32 count = 2;
+  string query = 3;
+}
+
+message FilterBooksRequest {
+  float min_price = 1;
+  float max_price = 2;
+  int32 min_year = 3;
+  int32 max_year = 4;
+}
+
+message FilterBooksResponse {
+  repeated Book books = 1;
+  int32 count = 2;
+}
+
+message GetStatsRequest {
+  // Empty
+}
+
+message GetStatsResponse {
+  int32 total_books = 1;
+  float average_price = 2;
+  int32 total_stock = 3;
+  int32 earliest_year = 4;
+  int32 latest_year = 5;
+}
+
 service BookCatalog {
   rpc GetBook(GetBookRequest) returns (GetBookResponse);
   rpc CreateBook(CreateBookRequest) returns (CreateBookResponse);
   rpc UpdateBook(UpdateBookRequest) returns (UpdateBookResponse);
   rpc DeleteBook(DeleteBookRequest) returns (DeleteBookResponse);
   rpc ListBooks(ListBooksRequest) returns (ListBooksResponse);
+  rpc SearchBooks(SearchBooksRequest) returns (SearchBooksResponse);
+  rpc FilterBooks(FilterBooksRequest) returns (FilterBooksResponse);
+  rpc GetStats(GetStatsRequest) returns (GetStatsResponse);
 }
