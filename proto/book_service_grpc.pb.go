@@ -19,11 +19,14 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	BookCatalog_GetBook_FullMethodName    = "/bookservice.BookCatalog/GetBook"
-	BookCatalog_CreateBook_FullMethodName = "/bookservice.BookCatalog/CreateBook"
-	BookCatalog_UpdateBook_FullMethodName = "/bookservice.BookCatalog/UpdateBook"
-	BookCatalog_DeleteBook_FullMethodName = "/bookservice.BookCatalog/DeleteBook"
-	BookCatalog_ListBooks_FullMethodName  = "/bookservice.BookCatalog/ListBooks"
+	BookCatalog_GetBook_FullMethodName     = "/bookservice.BookCatalog/GetBook"
+	BookCatalog_CreateBook_FullMethodName  = "/bookservice.BookCatalog/CreateBook"
+	BookCatalog_UpdateBook_FullMethodName  = "/bookservice.BookCatalog/UpdateBook"
+	BookCatalog_DeleteBook_FullMethodName  = "/bookservice.BookCatalog/DeleteBook"
+	BookCatalog_ListBooks_FullMethodName   = "/bookservice.BookCatalog/ListBooks"
+	BookCatalog_SearchBooks_FullMethodName = "/bookservice.BookCatalog/SearchBooks"
+	BookCatalog_FilterBooks_FullMethodName = "/bookservice.BookCatalog/FilterBooks"
+	BookCatalog_GetStats_FullMethodName    = "/bookservice.BookCatalog/GetStats"
 )
 
 // BookCatalogClient is the client API for BookCatalog service.
@@ -35,6 +38,9 @@ type BookCatalogClient interface {
 	UpdateBook(ctx context.Context, in *UpdateBookRequest, opts ...grpc.CallOption) (*UpdateBookResponse, error)
 	DeleteBook(ctx context.Context, in *DeleteBookRequest, opts ...grpc.CallOption) (*DeleteBookResponse, error)
 	ListBooks(ctx context.Context, in *ListBooksRequest, opts ...grpc.CallOption) (*ListBooksResponse, error)
+	SearchBooks(ctx context.Context, in *SearchBooksRequest, opts ...grpc.CallOption) (*SearchBooksResponse, error)
+	FilterBooks(ctx context.Context, in *FilterBooksRequest, opts ...grpc.CallOption) (*FilterBooksResponse, error)
+	GetStats(ctx context.Context, in *GetStatsRequest, opts ...grpc.CallOption) (*GetStatsResponse, error)
 }
 
 type bookCatalogClient struct {
@@ -95,6 +101,36 @@ func (c *bookCatalogClient) ListBooks(ctx context.Context, in *ListBooksRequest,
 	return out, nil
 }
 
+func (c *bookCatalogClient) SearchBooks(ctx context.Context, in *SearchBooksRequest, opts ...grpc.CallOption) (*SearchBooksResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SearchBooksResponse)
+	err := c.cc.Invoke(ctx, BookCatalog_SearchBooks_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *bookCatalogClient) FilterBooks(ctx context.Context, in *FilterBooksRequest, opts ...grpc.CallOption) (*FilterBooksResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FilterBooksResponse)
+	err := c.cc.Invoke(ctx, BookCatalog_FilterBooks_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *bookCatalogClient) GetStats(ctx context.Context, in *GetStatsRequest, opts ...grpc.CallOption) (*GetStatsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetStatsResponse)
+	err := c.cc.Invoke(ctx, BookCatalog_GetStats_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // BookCatalogServer is the server API for BookCatalog service.
 // All implementations must embed UnimplementedBookCatalogServer
 // for forward compatibility.
@@ -104,6 +140,9 @@ type BookCatalogServer interface {
 	UpdateBook(context.Context, *UpdateBookRequest) (*UpdateBookResponse, error)
 	DeleteBook(context.Context, *DeleteBookRequest) (*DeleteBookResponse, error)
 	ListBooks(context.Context, *ListBooksRequest) (*ListBooksResponse, error)
+	SearchBooks(context.Context, *SearchBooksRequest) (*SearchBooksResponse, error)
+	FilterBooks(context.Context, *FilterBooksRequest) (*FilterBooksResponse, error)
+	GetStats(context.Context, *GetStatsRequest) (*GetStatsResponse, error)
 	mustEmbedUnimplementedBookCatalogServer()
 }
 
@@ -128,6 +167,15 @@ func (UnimplementedBookCatalogServer) DeleteBook(context.Context, *DeleteBookReq
 }
 func (UnimplementedBookCatalogServer) ListBooks(context.Context, *ListBooksRequest) (*ListBooksResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListBooks not implemented")
+}
+func (UnimplementedBookCatalogServer) SearchBooks(context.Context, *SearchBooksRequest) (*SearchBooksResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SearchBooks not implemented")
+}
+func (UnimplementedBookCatalogServer) FilterBooks(context.Context, *FilterBooksRequest) (*FilterBooksResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method FilterBooks not implemented")
+}
+func (UnimplementedBookCatalogServer) GetStats(context.Context, *GetStatsRequest) (*GetStatsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetStats not implemented")
 }
 func (UnimplementedBookCatalogServer) mustEmbedUnimplementedBookCatalogServer() {}
 func (UnimplementedBookCatalogServer) testEmbeddedByValue()                     {}
@@ -240,6 +288,60 @@ func _BookCatalog_ListBooks_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _BookCatalog_SearchBooks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SearchBooksRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BookCatalogServer).SearchBooks(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: BookCatalog_SearchBooks_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BookCatalogServer).SearchBooks(ctx, req.(*SearchBooksRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _BookCatalog_FilterBooks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FilterBooksRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BookCatalogServer).FilterBooks(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: BookCatalog_FilterBooks_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BookCatalogServer).FilterBooks(ctx, req.(*FilterBooksRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _BookCatalog_GetStats_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetStatsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BookCatalogServer).GetStats(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: BookCatalog_GetStats_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BookCatalogServer).GetStats(ctx, req.(*GetStatsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // BookCatalog_ServiceDesc is the grpc.ServiceDesc for BookCatalog service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -266,6 +368,18 @@ var BookCatalog_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListBooks",
 			Handler:    _BookCatalog_ListBooks_Handler,
+		},
+		{
+			MethodName: "SearchBooks",
+			Handler:    _BookCatalog_SearchBooks_Handler,
+		},
+		{
+			MethodName: "FilterBooks",
+			Handler:    _BookCatalog_FilterBooks_Handler,
+		},
+		{
+			MethodName: "GetStats",
+			Handler:    _BookCatalog_GetStats_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
