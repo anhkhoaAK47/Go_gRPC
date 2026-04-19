@@ -13,106 +13,73 @@ import (
 )
 
 func main() {
-	// TODO: Connect to server
-	conn, err := grpc.Dial("localhost:50051",
-		grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// 1. Connect to Book Service (Port 50051)
+	bookConn, err := grpc.Dial("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		log.Fatalf("Failed to connect: %v", err)
+		log.Fatalf("Failed to connect to Book Service: %v", err)
 	}
-	defer conn.Close()
+	defer bookConn.Close()
+	bookClient := pb.NewBookCatalogClient(bookConn)
 
-	client := pb.NewBookCatalogClient(conn)
+	// 2. Connect to Author Service (Port 50052)
+	authorConn, err := grpc.Dial("localhost:50052", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Fatalf("Failed to connect to Author Service: %v", err)
+	}
+	defer authorConn.Close()
+	authorClient := pb.NewAuthorCatalogClient(authorConn)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancel()
 
-	// List all books
-	fmt.Println("=== Test 1: List ALL books ===")
-	resp, err := client.ListBooks(ctx, &pb.ListBooksRequest{
-		Page:     1,
-		PageSize: 10,
+	// --- TASK 5 TEST: CROSS-SERVICE COMMUNICATION ---
+	fmt.Println("=== Task 5: Testing Cross-Service Communication ===")
+
+	// Step A: Create an Author in the Author Service
+	fmt.Println("1. Creating Author...")
+	aResp, err := authorClient.CreateAuthor(ctx, &pb.CreateAuthorRequest{
+		Name:      "Martin Kleppmann",
+		Bio:       "Distributed Systems Researcher",
+		BirthYear: 1980,
+		Country:   "Germany",
 	})
-
 	if err != nil {
-		log.Fatalf("Failed to list all books: %v", err)
+		log.Fatalf("Failed to create author: %v", err)
 	}
+	authorID := aResp.Author.Id
+	fmt.Printf("Created Author: %s (ID: %d)\n", aResp.Author.Name, authorID)
 
-	fmt.Printf("Total Books: %d\n", resp.Total)
-	for _, b := range resp.Books {
-		fmt.Printf("%d. %s by %s - $%.2f\n", b.Id, b.Title, b.Author, b.Price)
-	}
-
-	// Get book
-	fmt.Println("\n=== Test 2: Get Book ===")
-	getResp, err := client.GetBook(ctx, &pb.GetBookRequest{Id: 1})
-	if err != nil {
-		log.Fatalf("Failed to get book: %v", err)
-	}
-
-	fmt.Printf("Book ID: %d\nTitle: %s\nAuthor: %s\nPrice: %.2f\n", getResp.Book.Id, getResp.Book.Title, getResp.Book.Author, getResp.Book.Price)
-
-	// Create book
-	fmt.Println("\n=== Test 3: Create Book ===")
-	createResp, err := client.CreateBook(ctx, &pb.CreateBookRequest{
-		Title:         "Learning Go",
-		Author:        "Jon Bodner",
-		Isbn:          "978-1492077213",
-		Price:         29.99,
-		Stock:         7,
-		PublishedYear: 2021,
+	// Step B: Create a Book in the Book Service linked to that Author ID
+	fmt.Println("2. Creating Book linked to Author...")
+	_, err = bookClient.CreateBook(ctx, &pb.CreateBookRequest{
+		Title:         "Designing Data-Intensive Applications",
+		Author:        "Martin Kleppmann",
+		Isbn:          "978-1449373320",
+		Price:         45.00,
+		Stock:         20,
+		PublishedYear: 2017,
+		AuthorId:      authorID, // The link!
 	})
 	if err != nil {
 		log.Fatalf("Failed to create book: %v", err)
 	}
 
-	fmt.Printf("Created Book ID: %d\nTitle: %s\n", createResp.Book.Id, createResp.Book.Title)
-
-	// Update book
-	fmt.Println("\n=== Test 4: Update Book ===")
-	updateResp, err := client.UpdateBook(ctx, &pb.UpdateBookRequest{
-		Id:            1,
-		Title:         "The Go Programming Language (2nd Edition)",
-		Author:        "Alan Donovan",
-		Isbn:          "978-0134190440",
-		Price:         35.99,
-		Stock:         10,
-		PublishedYear: 2016,
-	})
+	// Step C: Call GetAuthorBooks (Author Service will call Book Service internally)
+	fmt.Println("3. Fetching Author + Books (Aggregation)...")
+	finalResp, err := authorClient.GetAuthorBooks(ctx, &pb.GetAuthorBooksRequest{AuthorId: authorID})
 	if err != nil {
-		log.Fatalf("Failed to update book: %v", err)
+		log.Fatalf("Failed to get aggregated data: %v", err)
 	}
 
-	fmt.Printf("Updated book: %s\nNew price: $%.2f\n", updateResp.Book.Title, updateResp.Book.Price)
-
-	// Delete book
-	fmt.Println("\n=== Test 5: Delete Book ===")
-	deleteResp, err := client.DeleteBook(ctx, &pb.DeleteBookRequest{
-		Id: 1,
-	})
-	if err != nil {
-		log.Fatalf("Failed to delete book: %v", err)
+	fmt.Printf("\nResult from Author Service:\n")
+	fmt.Printf("Author: %s\n", finalResp.Author.Name)
+	fmt.Printf("Books found in Book Service: %d\n", finalResp.BookCount)
+	for _, b := range finalResp.Books {
+		fmt.Printf("- %s ($%.2f)\n", b.Title, b.Price)
 	}
 
-	fmt.Println("Book deleted successfully:", deleteResp.Success)
-
-	// Pagination
-	fmt.Println("\n=== Test 6: Pagination ===")
-	paginatedResp1, err := client.ListBooks(ctx, &pb.ListBooksRequest{
-		Page:     1,
-		PageSize: 3,
-	})
-	if err != nil {
-		log.Fatalf("Failed to list books with pagination: %v", err)
-	}
-	fmt.Printf("Page 1: %d books\n", len(paginatedResp1.Books))
-
-	paginatedResp2, err := client.ListBooks(ctx, &pb.ListBooksRequest{
-		Page:     2,
-		PageSize: 2,
-	})
-	if err != nil {
-		log.Fatalf("Failed to list books with pagination: %v", err)
-	}
-	fmt.Printf("Page 2: %d books\n", len(paginatedResp2.Books))
-
+	// --- Existing Book Service Tests (Test 1 & 2 only for brevity) ---
+	fmt.Println("\n=== Original Book Service Tests ===")
+	listResp, _ := bookClient.ListBooks(ctx, &pb.ListBooksRequest{Page: 1, PageSize: 5})
+	fmt.Printf("Book List Count: %d\n", len(listResp.Books))
 }

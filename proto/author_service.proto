@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package authorservice;
 
-option go_package = "./proto";
+option go_package = "./proto/author";
 
 message Author {
   int32 id = 1;
