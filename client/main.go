@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"time"
 
+	
 	pb "book-catalog-grpc/proto"
 
 	"google.golang.org/grpc"
@@ -13,73 +13,70 @@ import (
 )
 
 func main() {
-	// 1. Connect to Book Service (Port 50051)
-	bookConn, err := grpc.Dial("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		log.Fatalf("Failed to connect to Book Service: %v", err)
-	}
-	defer bookConn.Close()
-	bookClient := pb.NewBookCatalogClient(bookConn)
+	// 1. Connect to both services
+	bConn, _ := grpc.Dial("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	aConn, _ := grpc.Dial("localhost:50052", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	defer bConn.Close()
+	defer aConn.Close()
 
-	// 2. Connect to Author Service (Port 50052)
-	authorConn, err := grpc.Dial("localhost:50052", grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		log.Fatalf("Failed to connect to Author Service: %v", err)
-	}
-	defer authorConn.Close()
-	authorClient := pb.NewAuthorCatalogClient(authorConn)
+	bookClient := pb.NewBookCatalogClient(bConn)
+	authorClient := pb.NewAuthorCatalogClient(aConn)
+	ctx := context.Background()
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
-	defer cancel()
+	fmt.Println("=== Microservice Demo ===")
 
-	// --- TASK 5 TEST: CROSS-SERVICE COMMUNICATION ---
-	fmt.Println("=== Task 5: Testing Cross-Service Communication ===")
-
-	// Step A: Create an Author in the Author Service
-	fmt.Println("1. Creating Author...")
+	// 2. Create Author (Request goes to 50052)
+	fmt.Println("\n1. Creating author...")
 	aResp, err := authorClient.CreateAuthor(ctx, &pb.CreateAuthorRequest{
-		Name:      "Martin Kleppmann",
-		Bio:       "Distributed Systems Researcher",
-		BirthYear: 1980,
-		Country:   "Germany",
+		Name:      "Martin Fowler",
+		Bio:       "Software expert",
+		BirthYear: 1963,
+		Country:   "UK",
 	})
 	if err != nil {
-		log.Fatalf("Failed to create author: %v", err)
+		log.Fatalf("Fail: %v", err)
 	}
-	authorID := aResp.Author.Id
-	fmt.Printf("Created Author: %s (ID: %d)\n", aResp.Author.Name, authorID)
+	fmt.Printf("✓ Created author: %s (ID: %d)\n", aResp.Author.Name, aResp.Author.Id)
 
-	// Step B: Create a Book in the Book Service linked to that Author ID
-	fmt.Println("2. Creating Book linked to Author...")
+	// 3. Create Books for that Author (Requests go to 50051)
+	fmt.Println("\n2. Creating books for author...")
+
+	// First Book
 	_, err = bookClient.CreateBook(ctx, &pb.CreateBookRequest{
-		Title:         "Designing Data-Intensive Applications",
-		Author:        "Martin Kleppmann",
-		Isbn:          "978-1449373320",
-		Price:         45.00,
-		Stock:         20,
-		PublishedYear: 2017,
-		AuthorId:      authorID, // The link!
+		Title:         "Refactoring",
+		AuthorId:      aResp.Author.Id,
+		Isbn:          "978-0134",
+		Price:         49.99,
+		PublishedYear: 2018, // Added PublishedYear
 	})
+	if err == nil {
+		fmt.Println("✓ Created book: Refactoring")
+	}
+
+	// Second Book
+	_, err = bookClient.CreateBook(ctx, &pb.CreateBookRequest{
+		Title:         "Patterns of Enterprise Application Architecture",
+		AuthorId:      aResp.Author.Id,
+		Isbn:          "978-0321",
+		Price:         54.99,
+		PublishedYear: 2002, // Added PublishedYear
+	})
+	if err == nil {
+		fmt.Println("✓ Created book: Patterns of Enterprise Application Architecture")
+	}
+
+	// 4. Fetch integrated data (The Cross-Service Test)
+	fmt.Println("\n3. Fetching author's books (cross-service call)...")
+	res, err := authorClient.GetAuthorBooks(ctx, &pb.GetAuthorBooksRequest{AuthorId: aResp.Author.Id})
 	if err != nil {
-		log.Fatalf("Failed to create book: %v", err)
+		log.Fatalf("Cross-service call failed: %v", err)
 	}
 
-	// Step C: Call GetAuthorBooks (Author Service will call Book Service internally)
-	fmt.Println("3. Fetching Author + Books (Aggregation)...")
-	finalResp, err := authorClient.GetAuthorBooks(ctx, &pb.GetAuthorBooksRequest{AuthorId: authorID})
-	if err != nil {
-		log.Fatalf("Failed to get aggregated data: %v", err)
+	fmt.Printf("✓ Author: %s\n", res.Author.Name)
+	fmt.Printf("✓ Books written: %d\n", res.BookCount)
+	for i, b := range res.Books {
+		fmt.Printf("  %d. %s (%d)\n", i+1, b.Title, b.PublishedYear)
 	}
 
-	fmt.Printf("\nResult from Author Service:\n")
-	fmt.Printf("Author: %s\n", finalResp.Author.Name)
-	fmt.Printf("Books found in Book Service: %d\n", finalResp.BookCount)
-	for _, b := range finalResp.Books {
-		fmt.Printf("- %s ($%.2f)\n", b.Title, b.Price)
-	}
-
-	// --- Existing Book Service Tests (Test 1 & 2 only for brevity) ---
-	fmt.Println("\n=== Original Book Service Tests ===")
-	listResp, _ := bookClient.ListBooks(ctx, &pb.ListBooksRequest{Page: 1, PageSize: 5})
-	fmt.Printf("Book List Count: %d\n", len(listResp.Books))
+	fmt.Println("\n✓ Microservice demo completed!")
 }
