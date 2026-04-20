@@ -2,81 +2,72 @@ package main
 
 import (
 	"context"
+	
 	"fmt"
 	"log"
+	"time"
 
-	
 	pb "book-catalog-grpc/proto"
-
+	
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+
 )
 
 func main() {
-	// 1. Connect to both services
-	bConn, _ := grpc.Dial("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
-	aConn, _ := grpc.Dial("localhost:50052", grpc.WithTransportCredentials(insecure.NewCredentials()))
-	defer bConn.Close()
-	defer aConn.Close()
-
-	bookClient := pb.NewBookCatalogClient(bConn)
-	authorClient := pb.NewAuthorCatalogClient(aConn)
-	ctx := context.Background()
-
-	fmt.Println("=== Microservice Demo ===")
-
-	// 2. Create Author (Request goes to 50052)
-	fmt.Println("\n1. Creating author...")
-	aResp, err := authorClient.CreateAuthor(ctx, &pb.CreateAuthorRequest{
-		Name:      "Martin Fowler",
-		Bio:       "Software expert",
-		BirthYear: 1963,
-		Country:   "UK",
-	})
+	conn, err := grpc.Dial("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		log.Fatalf("Fail: %v", err)
+		log.Fatalf("did not connect: %v", err)
 	}
-	fmt.Printf("✓ Created author: %s (ID: %d)\n", aResp.Author.Name, aResp.Author.Id)
+	defer conn.Close()
+	
+	client := pb.NewBookCatalogClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
 
-	// 3. Create Books for that Author (Requests go to 50051)
-	fmt.Println("\n2. Creating books for author...")
-
-	// First Book
-	_, err = bookClient.CreateBook(ctx, &pb.CreateBookRequest{
-		Title:         "Refactoring",
-		AuthorId:      aResp.Author.Id,
-		Isbn:          "978-0134",
-		Price:         49.99,
-		PublishedYear: 2018, // Added PublishedYear
-	})
-	if err == nil {
-		fmt.Println("✓ Created book: Refactoring")
+	// === Test 1: Search by Title ===
+	fmt.Println("=== Test 1: Search by Title ===")
+	fmt.Println("Searching for \"go\"...")
+	res1, _ := client.SearchBooks(ctx, &pb.SearchBooksRequest{Query: "go", Field: "title"})
+	fmt.Printf("Found %d books:\n", res1.Count)
+	for _, b := range res1.Books {
+		fmt.Printf("- %s\n", b.Title)
 	}
 
-	// Second Book
-	_, err = bookClient.CreateBook(ctx, &pb.CreateBookRequest{
-		Title:         "Patterns of Enterprise Application Architecture",
-		AuthorId:      aResp.Author.Id,
-		Isbn:          "978-0321",
-		Price:         54.99,
-		PublishedYear: 2002, // Added PublishedYear
-	})
-	if err == nil {
-		fmt.Println("✓ Created book: Patterns of Enterprise Application Architecture")
+	// === Test 2: Search by Author ===
+	fmt.Println("\n=== Test 2: Search by Author ===")
+	fmt.Println("Searching for \"Martin\"...")
+	res2, _ := client.SearchBooks(ctx, &pb.SearchBooksRequest{Query: "Martin", Field: "author"})
+	fmt.Printf("Found %d books:\n", res2.Count)
+	for _, b := range res2.Books {
+		fmt.Printf("- %s by %s\n", b.Title, b.Author)
 	}
 
-	// 4. Fetch integrated data (The Cross-Service Test)
-	fmt.Println("\n3. Fetching author's books (cross-service call)...")
-	res, err := authorClient.GetAuthorBooks(ctx, &pb.GetAuthorBooksRequest{AuthorId: aResp.Author.Id})
-	if err != nil {
-		log.Fatalf("Cross-service call failed: %v", err)
-	}
+	// === Test 3: Filter by Price ===
+	fmt.Println("\n=== Test 3: Filter by Price ===")
+	fmt.Println("Books between $20 and $45:")
+	res3, _ := client.FilterBooks(ctx, &pb.FilterBooksRequest{MinPrice: 20, MaxPrice: 45})
+	fmt.Printf("Found %d books\n", res3.Count)
 
-	fmt.Printf("✓ Author: %s\n", res.Author.Name)
-	fmt.Printf("✓ Books written: %d\n", res.BookCount)
-	for i, b := range res.Books {
-		fmt.Printf("  %d. %s (%d)\n", i+1, b.Title, b.PublishedYear)
-	}
+	// === Test 4: Filter by Year ===
+	fmt.Println("\n=== Test 4: Filter by Year ===")
+	fmt.Println("Books published after 2010:")
+	res4, _ := client.FilterBooks(ctx, &pb.FilterBooksRequest{MinYear: 2010})
+	fmt.Printf("Found %d books\n", res4.Count)
 
-	fmt.Println("\n✓ Microservice demo completed!")
+	// === Test 5: Get Statistics ===
+	fmt.Println("\n=== Test 5: Get Statistics ===")
+	stats, _ := client.GetStats(ctx, &pb.GetStatsRequest{})
+	fmt.Printf("Total books: %d\n", stats.TotalBooks)
+	fmt.Printf("Average price: $%.2f\n", stats.AveragePrice)
+	fmt.Printf("Total stock: %d\n", stats.TotalStock)
+	fmt.Printf("Year range: %d - %d\n", stats.EarliestYear, stats.LatestYear)
+
+	// === Test 6: Error Cases ===
+	fmt.Println("\n=== Test 6: Error Cases ===")
+	_, errA := client.SearchBooks(ctx, &pb.SearchBooksRequest{Query: ""})
+	fmt.Printf("Empty search query: Error: %v\n", grpc.ErrorDesc(errA))
+
+	_, errB := client.FilterBooks(ctx, &pb.FilterBooksRequest{MinPrice: 100, MaxPrice: 50})
+	fmt.Printf("Invalid price range: Error: %v\n", grpc.ErrorDesc(errB))
 }

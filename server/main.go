@@ -19,44 +19,114 @@ type bookCatalogServer struct {
 	db *sql.DB
 }
 
-// Requirement: Create GetBooksByAuthor RPC method
-func (s *bookCatalogServer) GetBooksByAuthor(ctx context.Context, req *pb.GetBooksByAuthorRequest) (*pb.GetBooksByAuthorResponse, error) {
-
-	
-	query := "SELECT id, title, author, isbn, price, stock, published_year, author_id FROM books WHERE author_id = ?"
-	rows, err := s.db.QueryContext(ctx, query, req.AuthorId)
+// Helper to handle scanning and consistent error reporting
+func (s *bookCatalogServer) executeQuery(ctx context.Context, query string, args ...interface{}) (*pb.SearchBooksResponse, error) {
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to query: %v", err)
+		return nil, status.Errorf(codes.Internal, "database error: %v", err)
 	}
 	defer rows.Close()
+
 
 	var books []*pb.Book
 	for rows.Next() {
 		var b pb.Book
-		rows.Scan(&b.Id, &b.Title, &b.Author, &b.Isbn, &b.Price, &b.Stock, &b.PublishedYear, &b.AuthorId)
+		// Scan order must match the SELECT order exactly
+		if err := rows.Scan(&b.Id, &b.Title, &b.Author, &b.Isbn, &b.Price, &b.Stock, &b.PublishedYear); err != nil {
+			return nil, status.Errorf(codes.Internal, "scan error: %v", err)
+		}
 		books = append(books, &b)
 	}
-
-	return &pb.GetBooksByAuthorResponse{Books: books}, nil
+	return &pb.SearchBooksResponse{Books: books, Count: int32(len(books))}, nil
 }
 
-// Requirement: Add author_id field to Book management
-func (s *bookCatalogServer) CreateBook(ctx context.Context, req *pb.CreateBookRequest) (*pb.CreateBookResponse, error) {
+// --- Task 4: SearchBooks (Case-Insensitive) ---
+func (s *bookCatalogServer) SearchBooks(ctx context.Context, req *pb.SearchBooksRequest) (*pb.SearchBooksResponse, error) {
 
-	query := "INSERT INTO books (title, author, isbn, price, stock, published_year, author_id) VALUES (?, ?, ?, ?, ?, ?, ?)"
-	res, err := s.db.ExecContext(ctx, query, req.Title, req.Author, req.Isbn, req.Price, req.Stock, req.PublishedYear, req.AuthorId)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to insert: %v", err)
+	if req.Query == "" {
+		return nil, status.Error(codes.InvalidArgument, "search query required")
 	}
-	id, _ := res.LastInsertId()
-	return &pb.CreateBookResponse{Book: &pb.Book{Id: int32(id), Title: req.Title, AuthorId: req.AuthorId}}, nil
+
+
+	searchPattern := "%" + req.Query + "%"
+	var query string
+	var args []interface{}
+
+	switch req.Field {
+	case "title":
+		query = "SELECT id, title, author, isbn, price, stock, published_year FROM books WHERE title LIKE ? COLLATE NOCASE"
+		args = []interface{}{searchPattern}
+	case "author":
+		query = "SELECT id, title, author, isbn, price, stock, published_year FROM books WHERE author LIKE ? COLLATE NOCASE"
+		args = []interface{}{searchPattern}
+	case "isbn":
+		query = "SELECT id, title, author, isbn, price, stock, published_year FROM books WHERE isbn = ?"
+		args = []interface{}{req.Query}
+	default:
+		query = "SELECT id, title, author, isbn, price, stock, published_year FROM books WHERE (title LIKE ? OR author LIKE ? OR isbn LIKE ?) COLLATE NOCASE"
+		args = []interface{}{searchPattern, searchPattern, searchPattern}
+	}
+
+	return s.executeQuery(ctx, query, args...)
 }
 
-// Task 4 logic preserved for stats requirement
-func (s *bookCatalogServer) GetStats(ctx context.Context, req *pb.GetStatsRequest) (*pb.GetStatsResponse, error) {
+// --- Task 4: FilterBooks ---
+func (s *bookCatalogServer) FilterBooks(ctx context.Context, req *pb.FilterBooksRequest) (*pb.FilterBooksResponse, error) {
+	if req.MinPrice < 0 || req.MaxPrice < 0 {
+		return nil, status.Error(codes.InvalidArgument, "price cannot be negative")
+	}
+	if req.MaxPrice > 0 && req.MinPrice > req.MaxPrice {
+		return nil, status.Error(codes.InvalidArgument, "min_price cannot be greater than max_price")
+	}
+
+	
+	query := "SELECT id, title, author, isbn, price, stock, published_year FROM books WHERE 1=1"
+	var args []interface{}
+
+
+	if req.MinPrice > 0 {
+		query += " AND price >= ?"; args = append(args, req.MinPrice)
+	}
+	if req.MaxPrice > 0 {
+		query += " AND price <= ?"; args = append(args, req.MaxPrice)
+	}
+	
+	if req.MinYear > 0 {
+		query += " AND published_year >= ?"; args = append(args, req.MinYear)
+	}
+	if req.MaxYear > 0 {
+		query += " AND published_year <= ?"; args = append(args, req.MaxYear)
+	}
+
+	
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "filter failed: %v", err)
+	}
+	defer rows.Close()
+
+
+	var books []*pb.Book
+	for rows.Next() {
+		var b pb.Book
+		rows.Scan(&b.Id, &b.Title, &b.Author, &b.Isbn, &b.Price, &b.Stock, &b.PublishedYear)
+		books = append(books, &b)
+	}
+	return &pb.FilterBooksResponse{Books: books, Count: int32(len(books))}, nil
+}
+
+// --- Task 4: GetStats (Cleaned) ---
+func (s *bookCatalogServer) GetStats(ctx context.Context, req *pb.GetStatsRequest) (*pb.
+GetStatsResponse, error) {
 	var stats pb.GetStatsResponse
-	query := `SELECT COUNT(*), IFNULL(AVG(price), 0), IFNULL(SUM(stock), 0), 
-              IFNULL(MIN(published_year), 0), IFNULL(MAX(published_year), 0) FROM books`
+	query := `SELECT 
+                COUNT(*), 
+                IFNULL(AVG(price), 0), 
+                IFNULL(SUM(stock), 0), 
+                IFNULL(MIN(published_year), 0), 
+                IFNULL(MAX(published_year), 0) 
+              FROM books WHERE published_year > 0`
+	
 	err := s.db.QueryRowContext(ctx, query).Scan(
 		&stats.TotalBooks, &stats.AveragePrice, &stats.TotalStock, &stats.EarliestYear, &stats.LatestYear,
 	)
@@ -69,20 +139,45 @@ func (s *bookCatalogServer) GetStats(ctx context.Context, req *pb.GetStatsReques
 
 
 func initDB() (*sql.DB, error) {
-	db, _ := sql.Open("sqlite3", "./books.db")
-	db.Exec(`CREATE TABLE IF NOT EXISTS books (
-		id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, author TEXT, isbn TEXT, 
-		price REAL, stock INTEGER, published_year INTEGER, author_id INTEGER DEFAULT 0
-	);`)
-	db.Exec("ALTER TABLE books ADD COLUMN author_id INTEGER DEFAULT 0") // Migration
+	db, err := sql.Open("sqlite3", "./books.db")
+	if err != nil {
+		return nil, err
+	}
+	// Note: Database has an author_id field but our proto doesn't use it yet 
+	schema := `CREATE TABLE IF NOT EXISTS books (
+		id INTEGER PRIMARY KEY AUTOINCREMENT, 
+		title TEXT NOT NULL, 
+		author TEXT NOT NULL, 
+		isbn TEXT NOT NULL, 
+		price REAL NOT NULL, 
+		stock INTEGER NOT NULL, 
+		published_year INTEGER NOT NULL
+	);`
+	if _, err := db.Exec(schema); err != nil {
+		return nil, err
+	}
+	
 	return db, nil
 }
 
 func main() {
-	db, _ := initDB()
-	lis, _ := net.Listen("tcp", ":50051")
+
+	db, err := initDB()
+	if err != nil {
+		log.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	lis, err := net.Listen("tcp", ":50051")
+	if err != nil {
+		log.Fatalf("failed to listen: %v", err)
+	}
+
 	srv := grpc.NewServer()
 	pb.RegisterBookCatalogServer(srv, &bookCatalogServer{db: db})
-	log.Println("📚 Book Service running on :50051")
-	srv.Serve(lis)
+
+	log.Printf("📚 Server (Task 4) listening at %v", lis.Addr())
+	if err := srv.Serve(lis); err != nil {
+		log.Fatalf("failed to serve: %v", err)
+	}
 }
